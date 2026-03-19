@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# shellcheck source=lib/shared.bash
+source "${DIR}/../lib/shared.bash"
+# shellcheck source=lib/tools.bash
+source "${DIR}/../lib/tools.bash"
+
+# ---------------------------------------------------------------------------
+# Parse explicit tools from plugin config
+# ---------------------------------------------------------------------------
+
+read_configured_tools() {
+  CONFIGURED_TOOLS=()
+  local i=0
+  while true; do
+    local var="BUILDKITE_PLUGIN_SETUP_RUNTIME_TOOLS_${i}"
+    local value="${!var:-}"
+    if [ -z "$value" ]; then break; fi
+    CONFIGURED_TOOLS+=("$value")
+    i=$((i + 1))
+  done
+}
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+main() {
+  echo "~~~ :toolbox: Setting up runtime"
+
+  local dir_cfg
+  dir_cfg="$(plugin_cfg dir)"
+  if [ -n "$dir_cfg" ]; then
+    WORKING_DIRECTORY="$dir_cfg"
+  else
+    WORKING_DIRECTORY="${BUILDKITE_BUILD_CHECKOUT_PATH:-${PWD}}"
+  fi
+
+  # 1. Ensure mise is installed
+  ensure_mise
+
+  # 2. Install explicitly configured tools (tools: ["go@1.22", "node@20"])
+  read_configured_tools
+
+  if [ "${#CONFIGURED_TOOLS[@]}" -gt 0 ]; then
+    log_info "Installing configured tools: ${CONFIGURED_TOOLS[*]}"
+
+    for tool_spec in "${CONFIGURED_TOOLS[@]}"; do
+      run_mise install "$tool_spec"
+      run_mise use --global "$tool_spec"
+    done
+  fi
+
+  # 3. Auto-detect from repo config files
+  local auto_detect
+  auto_detect="$(plugin_cfg_default auto-detect true)"
+
+  if [ "$auto_detect" = "true" ]; then
+    if [ -f "${WORKING_DIRECTORY}/mise.toml" ] \
+      || [ -f "${WORKING_DIRECTORY}/.mise.toml" ] \
+      || [ -f "${WORKING_DIRECTORY}/.tool-versions" ]; then
+      log_info "Installing tools from repo config"
+      (cd "$WORKING_DIRECTORY" && run_mise install)
+    else
+      log_debug "No mise/tool-versions config found in ${WORKING_DIRECTORY}"
+    fi
+  fi
+
+  # 4. Export tool environment
+  if [ -z "${BUILDKITE_ENV_FILE:-}" ]; then
+    log_error "BUILDKITE_ENV_FILE is not set"
+    exit 1
+  fi
+
+  append_export MISE_DATA_DIR "$MISE_DIR"
+  append_export MISE_TRUSTED_CONFIG_PATHS "$WORKING_DIRECTORY"
+  append_export MISE_YES "1"
+
+  export MISE_DATA_DIR="$MISE_DIR"
+  export MISE_TRUSTED_CONFIG_PATHS="$WORKING_DIRECTORY"
+  export MISE_YES="1"
+
+  (cd "$WORKING_DIRECTORY" && apply_mise_env)
+
+  # 5. Tool-specific post-install setup & verification
+  for tool_spec in "${CONFIGURED_TOOLS[@]}"; do
+    local tool="${tool_spec%%@*}"
+    local version="${tool_spec#*@}"
+    tool_post_install "$tool" "$version"
+  done
+
+  echo "~~~ :white_check_mark: Runtime ready"
+  for tool_spec in "${CONFIGURED_TOOLS[@]}"; do
+    local tool="${tool_spec%%@*}"
+    tool_verify "$tool"
+  done
+}
+
+main "$@"

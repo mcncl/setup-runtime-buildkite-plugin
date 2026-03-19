@@ -1,0 +1,8 @@
+steps:
+  - label: ":shell: Lint"
+    command: |
+      docker run --rm -v "$$PWD:/plugin" -w /plugin buildkite/plugin-linter --id buildkite/setup-runtime --path /plugin
+
+  - label: ":bats: Tests"
+    command: |
+      docker run --rm -v "$$PWD:/plugin" -w /plugin buildkite/plugin-tester

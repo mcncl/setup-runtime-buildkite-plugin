@@ -1,0 +1,36 @@
+name: Setup Runtime
+description: Install and configure language runtimes and tools with automatic environment setup
+author: https://github.com/buildkite-plugins
+requirements:
+  - curl
+  - tar
+configuration:
+  properties:
+    tools:
+      type: array
+      items:
+        type: string
+      description: >
+        Tools to install, in tool@version format (e.g. go@1.22, node@20).
+        These are installed and activated regardless of repo config files.
+    auto-detect:
+      type: boolean
+      default: true
+      description: >
+        When true, also install tools from mise.toml / .mise.toml / .tool-versions
+        if present in the checkout directory.
+    version:
+      type: string
+      default: latest
+      description: Version of mise to install (e.g. 2026.2.11).
+    dir:
+      type: string
+      description: >
+        Directory for mise install/env. Defaults to the checkout directory.
+        Useful for monorepos.
+    cache-dir:
+      type: string
+      description: >
+        Directory for MISE_DATA_DIR. On hosted agents with a cache volume
+        this is detected automatically.
+  additionalProperties: false
