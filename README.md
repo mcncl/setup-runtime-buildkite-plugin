@@ -1,5 +1,7 @@
 # Setup Runtime Buildkite Plugin
 
+[![Build status](https://badge.buildkite.com/ba96a554196ea452889ed5844532163f7c1b5a637d2a50f00d.svg)](https://buildkite.com/no-assembly/setup-runtime-buildkite-plugin)
+
 A [Buildkite plugin](https://buildkite.com/docs/agent/v3/plugins) to install and configure language runtimes and tools for your build steps.
 
 Specify the tools you need directly in your pipeline YAML — the plugin installs them, configures the environment (`GOROOT`, `JAVA_HOME`, corepack, etc.), and prints the active versions to the build log. It can also auto-detect tools from `mise.toml`, `.mise.toml`, or `.tool-versions` in your repository.
