@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Shared utility functions for the setup-runtime plugin
 
@@ -125,7 +125,7 @@ install_mise() {
     set -euo pipefail
     trap 'rm -f "$archive"; rm -rf "$extracted"' EXIT
 
-    curl -fsSL "$url" > "$archive"
+    curl -fsSL --connect-timeout 10 --max-time 120 "$url" > "$archive"
     tar -xzf "$archive" -C "$extracted"
 
     mkdir -p "$MISE_BIN"
@@ -150,7 +150,7 @@ ensure_mise() {
 
   local version
   if [ "$required_version_raw" = latest ]; then
-    version="$(curl -fsSL https://mise.jdx.dev/VERSION | tr -d '\r\n')"
+    version="$(curl -fsSL --connect-timeout 10 --max-time 30 https://mise.jdx.dev/VERSION | tr -d '\r\n')"
   else
     version="${required_version_raw#v}"
   fi
@@ -158,7 +158,7 @@ ensure_mise() {
 
   local current=""
   if [ -x "$MISE_BINARY" ]; then
-    current="$("$MISE_BINARY" --version 2>/dev/null | awk '{print $2}' | tr -d 'v')"
+    current="$("$MISE_BINARY" --version 2>/dev/null | awk '{print $1}' | tr -d 'v')"
   fi
 
   if [ -z "$current" ] || [ "$current" != "$version" ]; then
@@ -192,11 +192,20 @@ append_export() {
   printf 'export %s=%q\n' "$name" "$value" >> "$BUILDKITE_ENV_FILE"
 }
 
+# Prepend a directory to PATH in both the current shell and BUILDKITE_ENV_FILE.
+prepend_path() {
+  local dir="$1"
+  export PATH="${dir}:${PATH}"
+  printf 'export PATH=%q:$PATH\n' "$dir" >> "$BUILDKITE_ENV_FILE"
+}
+
 apply_mise_env() {
   local mise_env_file
   mise_env_file="$(mktemp)"
 
-  run_mise env --shell bash | tee -a "$BUILDKITE_ENV_FILE" > "$mise_env_file"
+  # Filter to export lines only — mise env may include comments or other
+  # statements that could cause issues in BUILDKITE_ENV_FILE.
+  run_mise env --shell bash | grep '^export ' | tee -a "$BUILDKITE_ENV_FILE" > "$mise_env_file"
 
   # shellcheck disable=SC1090
   . "$mise_env_file"

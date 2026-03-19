@@ -1,123 +1,72 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# Tool-specific post-install environment setup.
+# Tool dispatch layer.
 #
-# After mise installs a tool, some runtimes need extra env vars (GOROOT,
-# JAVA_HOME, etc.) or verification steps.  This file centralises that
-# per-tool knowledge — the thing that makes setup-runtime more than a
-# thin mise wrapper.
+# Sources individual tool files from lib/tools/ and dispatches
+# setup/verify calls based on tool name. To add a new tool:
+#
+#   1. Create lib/tools/<name>.bash
+#   2. Define setup_<name>() and verify_<name>()
+#   3. Add a source line and (if needed) an alias in resolve_tool_name()
 
 set -euo pipefail
 
-# Dispatch post-install setup for a tool.
-# Arguments: tool_name  tool_version
-tool_post_install() {
+TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools"
+
+# shellcheck source=lib/tools/go.bash
+source "${TOOLS_DIR}/go.bash"
+# shellcheck source=lib/tools/java.bash
+source "${TOOLS_DIR}/java.bash"
+# shellcheck source=lib/tools/node.bash
+source "${TOOLS_DIR}/node.bash"
+# shellcheck source=lib/tools/python.bash
+source "${TOOLS_DIR}/python.bash"
+# shellcheck source=lib/tools/ruby.bash
+source "${TOOLS_DIR}/ruby.bash"
+# shellcheck source=lib/tools/rust.bash
+source "${TOOLS_DIR}/rust.bash"
+
+# Map alternative tool names to their canonical name.
+resolve_tool_name() {
   local tool="$1"
+  case "$tool" in
+    golang)  echo "go"   ;;
+    openjdk) echo "java" ;;
+    nodejs)  echo "node" ;;
+    *)       echo "$tool" ;;
+  esac
+}
+
+# Dispatch post-install setup for a tool.
+# Arguments: tool_name tool_version
+tool_post_install() {
+  local tool
+  tool="$(resolve_tool_name "$1")"
   local version="$2"
 
-  # Resolve the install path from mise
+  # Use the original tool name (not resolved alias) for mise lookup,
+  # since mise knows the tool by its original name (e.g. "golang").
   local install_path
-  install_path="$(run_mise where "${tool}@${version}" 2>/dev/null || true)"
+  install_path="$(run_mise where "${1}@${version}" 2>/dev/null || true)"
 
-  case "$tool" in
-    go|golang)   _setup_go   "$install_path" "$version" ;;
-    java|openjdk) _setup_java "$install_path" "$version" ;;
-    python)      _setup_python "$install_path" "$version" ;;
-    node|nodejs) _setup_node  "$install_path" "$version" ;;
-    ruby)        _setup_ruby  "$install_path" "$version" ;;
-    *)           log_debug "No tool-specific setup for ${tool}" ;;
-  esac
+  local setup_fn="setup_${tool}"
+  if type -t "$setup_fn" &>/dev/null; then
+    "$setup_fn" "$install_path"
+  else
+    log_debug "No tool-specific setup for ${tool}"
+  fi
 }
 
 # Print the active version of a tool for build-log verification.
 # Arguments: tool_name
 tool_verify() {
-  local tool="$1"
+  local tool
+  tool="$(resolve_tool_name "$1")"
 
-  case "$tool" in
-    go|golang)    go version    2>/dev/null || true ;;
-    java|openjdk) java -version 2>&1 | head -1 || true ;;
-    python)       python3 --version 2>/dev/null || python --version 2>/dev/null || true ;;
-    node|nodejs)  node --version 2>/dev/null || true ;;
-    ruby)         ruby --version 2>/dev/null || true ;;
-    rust)         rustc --version 2>/dev/null || true ;;
-    *)            log_debug "No verification command for ${tool}" ;;
-  esac
-}
-
-# ---------------------------------------------------------------------------
-# Per-tool setup functions
-# ---------------------------------------------------------------------------
-
-_setup_go() {
-  local install_path="$1" version="$2"
-
-  if [ -z "$install_path" ]; then return; fi
-
-  export GOROOT="$install_path"
-  append_export GOROOT "$install_path"
-
-  if [ -z "${GOPATH:-}" ]; then
-    export GOPATH="${HOME}/go"
-    append_export GOPATH "${HOME}/go"
-    mkdir -p "${GOPATH}/bin"
+  local verify_fn="verify_${tool}"
+  if type -t "$verify_fn" &>/dev/null; then
+    "$verify_fn"
+  else
+    log_debug "No verification command for ${tool}"
   fi
-
-  log_debug "GOROOT=${GOROOT} GOPATH=${GOPATH}"
-}
-
-_setup_java() {
-  local install_path="$1" version="$2"
-
-  if [ -z "$install_path" ]; then return; fi
-
-  # On macOS, the actual home is inside Contents/Home
-  if [ -d "${install_path}/Contents/Home" ]; then
-    install_path="${install_path}/Contents/Home"
-  fi
-
-  export JAVA_HOME="$install_path"
-  append_export JAVA_HOME "$install_path"
-  log_debug "JAVA_HOME=${JAVA_HOME}"
-}
-
-_setup_python() {
-  local install_path="$1" version="$2"
-
-  if [ -z "$install_path" ]; then return; fi
-
-  # Prevent pip from installing outside a virtualenv by default in CI,
-  # but don't override if the user has already set this.
-  if [ -z "${PIP_REQUIRE_VIRTUALENV:-}" ]; then
-    export PIP_REQUIRE_VIRTUALENV=0
-    append_export PIP_REQUIRE_VIRTUALENV "0"
-  fi
-
-  log_debug "Python install path: ${install_path}"
-}
-
-_setup_node() {
-  local install_path="$1" version="$2"
-
-  if [ -z "$install_path" ]; then return; fi
-
-  # Enable corepack so yarn/pnpm are available without separate install
-  if [ -x "${install_path}/bin/corepack" ]; then
-    "${install_path}/bin/corepack" enable 2>/dev/null || true
-    log_debug "corepack enabled"
-  fi
-}
-
-_setup_ruby() {
-  local install_path="$1" version="$2"
-
-  if [ -z "$install_path" ]; then return; fi
-
-  if [ -z "${GEM_HOME:-}" ]; then
-    export GEM_HOME="${HOME}/.gem"
-    append_export GEM_HOME "${HOME}/.gem"
-    mkdir -p "${GEM_HOME}/bin"
-  fi
-
-  log_debug "GEM_HOME=${GEM_HOME}"
 }
